@@ -1,0 +1,7 @@
+{
+  "name": "VibeWall - AI Wallpaper Generator - Deploy",
+  "description": "Generate stunning phone wallpapers based on your vibe. Features remixing, 4K resolution support, and various aspect ratios powered by Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
