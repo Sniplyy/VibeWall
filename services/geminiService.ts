@@ -117,6 +117,17 @@ export const generateWallpaper = async (
                 },
             },
         });
+
+        // Validate response structure immediately inside the loop
+        const firstCandidate = response?.candidates?.[0];
+        const hasValidContent = firstCandidate?.content?.parts && firstCandidate.content.parts.length > 0;
+
+        if (!hasValidContent) {
+             const finishReason = firstCandidate?.finishReason || 'UNKNOWN';
+             console.warn(`Attempt ${attempts + 1}: Received empty response structure. FinishReason: ${finishReason}`);
+             throw new Error("EMPTY_RESPONSE_RETRY");
+        }
+
         break; // Success
       } catch (error: any) {
         attempts++;
@@ -139,7 +150,7 @@ export const generateWallpaper = async (
              throw new Error("Generation quota exceeded. Please check your plan or try again later.");
         }
 
-        // Retry conditions: 503, 500, 502, 504, overloaded, UNAVAILABLE, INTERNAL
+        // Retry conditions: 503, 500, 502, 504, overloaded, UNAVAILABLE, INTERNAL, or Empty Response
         const isRetryable = 
             errorMessage.includes("503") || 
             errorMessage.includes("overloaded") || 
@@ -148,7 +159,8 @@ export const generateWallpaper = async (
             errorMessage.includes("INTERNAL") ||
             errorMessage.includes("Internal error") ||
             errorMessage.includes("502") || 
-            errorMessage.includes("504");
+            errorMessage.includes("504") ||
+            errorMessage.includes("EMPTY_RESPONSE_RETRY");
 
         if (isRetryable && attempts <= maxAttempts) {
             // Aggressive backoff: Start at 10 seconds.
@@ -167,9 +179,9 @@ export const generateWallpaper = async (
       }
   }
 
+  // Safe extraction (already validated above, but type-safe check)
   if (response.candidates && response.candidates.length > 0) {
     const firstCandidate = response.candidates[0];
-    // Check if content and parts exist before iterating
     if (firstCandidate.content && Array.isArray(firstCandidate.content.parts)) {
         for (const part of firstCandidate.content.parts) {
             if (part.inlineData) {
@@ -368,14 +380,18 @@ export const generateLiveWallpaper = async (
         return URL.createObjectURL(blob);
 
     } catch (error: any) {
-        console.error("Video generation failed:", error);
+        // Suppress console.error for expected 429s to clean up logs, handle normally
         const errorMessage = getErrorMessage(error);
+        if (errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("429")) {
+             console.warn("Quota exceeded:", errorMessage);
+             throw new Error("Video generation quota exceeded. Please check your plan or try again later.");
+        }
+
         if (errorMessage.includes("caller does not have permission") || errorMessage.includes("API_KEY_INVALID")) {
              throw new Error("API_KEY_INVALID");
         }
-        if (errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("429")) {
-             throw new Error("Video generation quota exceeded. Please check your plan or try again later.");
-        }
+        
+        console.error("Video generation failed:", error);
         throw error;
     }
 };

@@ -123,7 +123,7 @@ const App: React.FC = () => {
 
   // Progress simulation for video generation
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: any;
     if (loading && activeGenerationMode === 'video') {
       setLoadingProgress(0);
       const startTime = Date.now();
