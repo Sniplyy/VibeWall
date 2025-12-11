@@ -37,6 +37,16 @@ const SOCIAL_PLATFORMS = [
   { id: 'link', name: 'Copy Link', icon: Link, color: 'hover:text-indigo-400' },
 ];
 
+const SOCIAL_URLS: Record<string, string> = {
+  instagram: 'https://www.instagram.com/',
+  facebook: 'https://www.facebook.com/',
+  threads: 'https://www.threads.net/',
+  youtube: 'https://studio.youtube.com/',
+  reddit: 'https://www.reddit.com/',
+  whatsapp: 'https://web.whatsapp.com/',
+  telegram: 'https://web.telegram.org/',
+};
+
 const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, onJumpToChat, onGenerateSimilar }) => {
   const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -169,10 +179,21 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, 
              setShareFeedback('Shared!');
         } else {
             // 3. Desktop / Fallback
-            if (wallpaper.type === 'image' && typeof ClipboardItem !== 'undefined' && navigator.clipboard) {
+            // If the user selected a social platform, download the file and open the platform
+            const socialUrl = platformId ? SOCIAL_URLS[platformId] : undefined;
+            
+            if (socialUrl) {
+                // Download file so user has it ready
+                handleDownload();
+                
+                // Open new tab to the social media site
+                window.open(socialUrl, '_blank');
+                
+                const name = SOCIAL_PLATFORMS.find(p => p.id === platformId)?.name || 'App';
+                setShareFeedback(`Saved! Upload to ${name}`);
+            } else if (wallpaper.type === 'image' && typeof ClipboardItem !== 'undefined' && navigator.clipboard) {
                  await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-                 const name = SOCIAL_PLATFORMS.find(p => p.id === platformId)?.name || 'App';
-                 setShareFeedback(`Copied! Paste in ${name}`);
+                 setShareFeedback(`Copied! Paste in App`);
             } else {
                  handleDownload();
                  setShareFeedback('Downloaded!');
@@ -188,7 +209,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, 
         setTimeout(() => {
             setShareFeedback(null);
             setIsShareMenuOpen(false);
-        }, 3000);
+        }, 4000);
     }
   };
 

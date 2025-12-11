@@ -37,9 +37,13 @@ const getErrorMessage = (error: any): string => {
     
     // Check for API error response shape: { error: { code, message, status } }
     if (error.error) {
-        if (error.error.message) msg += " " + error.error.message;
-        if (error.error.code) msg += " " + error.error.code;
-        if (error.error.status) msg += " " + error.error.status;
+        // If the outer message is empty or generic, replace it with the API message
+        if (error.error.message) {
+            msg = error.error.message;
+        } else {
+             if (error.error.code) msg += " " + error.error.code;
+             if (error.error.status) msg += " " + error.error.status;
+        }
     }
     
     // Fallback to stringify if empty so far
@@ -379,6 +383,12 @@ export const generateLiveWallpaper = async (
                      console.warn("Video filtered:", reason);
                      throw new Error(`Generation blocked: ${reason}`);
                 }
+                
+                // Fallback: Check if the filtered count is > 0 even if reasons text is missing
+                if (root?.raiMediaFilteredCount > 0) {
+                    console.warn("Video filtered (count > 0, reasons missing)");
+                    throw new Error("Generation blocked: Content filtered by safety policies.");
+                }
             }
 
             console.error("Video operation completed but missing URI. Operation Dump:", JSON.stringify(currentOperation, null, 2));
@@ -393,8 +403,9 @@ export const generateLiveWallpaper = async (
         return URL.createObjectURL(blob);
 
     } catch (error: any) {
-        // Suppress console.error for expected 429s to clean up logs, handle normally
         const errorMessage = getErrorMessage(error);
+        
+        // Suppress console.error for expected 429s
         if (errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("429")) {
              console.warn("Quota exceeded:", errorMessage);
              throw new Error("Video generation quota exceeded. Please check your plan or try again later.");
@@ -402,6 +413,12 @@ export const generateLiveWallpaper = async (
 
         if (errorMessage.includes("caller does not have permission") || errorMessage.includes("API_KEY_INVALID")) {
              throw new Error("API_KEY_INVALID");
+        }
+        
+        // Suppress console.error for safety blocks to avoid noise in logs
+        if (errorMessage.includes("Generation blocked") || errorMessage.includes("safety policies")) {
+             console.warn("Generation stopped due to safety:", errorMessage);
+             throw error;
         }
         
         console.error("Video generation failed:", error);
