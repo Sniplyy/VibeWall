@@ -299,33 +299,33 @@ export const generateLiveWallpaper = async (
             await wait(10000); // Check every 10 seconds
             
             try {
-                // Try SDK Polling first with correct object structure
-                // We pass the full operation object as requested by docs
-                // AND we ensure .name is present
-                const opParam = { ...currentOperation };
-                if (!opParam.name) opParam.name = operationName;
-                
-                // Use generic get if getVideosOperation is flakey
+                // Try SDK Polling first with simplified object structure
+                // Pass strictly { name: operationName } to avoid object serialization issues in the SDK
                 if (ai.operations && (ai.operations as any).get) {
                      currentOperation = await (ai.operations as any).get({ name: operationName });
                 } else {
                      currentOperation = await ai.operations.getVideosOperation({ 
-                        operation: opParam as any
+                        operation: { name: operationName } as any
                     });
                 }
                 
             } catch (pollError: any) {
-                console.warn("SDK polling failed, attempting REST fallback.", pollError);
+                console.warn("SDK polling failed, attempting REST fallback.", pollError.message);
                 
                 // Fallback to direct REST call
                 try {
-                    // Use the captured local apiKey variable which is guaranteed to be the string
-                    const url = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
-                    const response = await fetch(url);
+                    // Use captured apiKey in header for better robustness
+                    const url = `https://generativelanguage.googleapis.com/v1beta/${operationName}`;
+                    const response = await fetch(url, {
+                        headers: {
+                            'x-goog-api-key': apiKey
+                        }
+                    });
+                    
                     if (!response.ok) {
                          const errText = await response.text();
                          console.error(`REST polling error body: ${errText}`);
-                         throw new Error(`REST polling failed: ${response.status} at ${url}`);
+                         throw new Error(`REST polling failed: ${response.status}`);
                     }
                     currentOperation = await response.json();
                 } catch (fetchError) {
@@ -342,27 +342,40 @@ export const generateLiveWallpaper = async (
         }
 
         // Handle response extraction carefully
-        const potentialResults = [
+        // We accumulate all possible objects that might contain the output array
+        const potentialRoots = [
             currentOperation.result,
             currentOperation.response,
             currentOperation.result?.value,
-            currentOperation.response?.value
+            currentOperation.response?.value,
+            // Deep dive for weird nestings sometimes seen in dumps or REST responses
+            currentOperation.response?.generateVideoResponse,
+            currentOperation.result?.generateVideoResponse
         ];
 
         let downloadLink: string | undefined;
 
-        for (const res of potentialResults) {
-            if (res?.generatedVideos?.[0]?.video?.uri) {
-                downloadLink = res.generatedVideos[0].video.uri;
+        for (const root of potentialRoots) {
+            if (!root) continue;
+
+            // 1. Check generatedVideos (Standard SDK)
+            if (root.generatedVideos?.[0]?.video?.uri) {
+                downloadLink = root.generatedVideos[0].video.uri;
+                break;
+            }
+            
+            // 2. Check generatedSamples (Alternative format found in some REST dumps)
+            if (root.generatedSamples?.[0]?.video?.uri) {
+                downloadLink = root.generatedSamples[0].video.uri;
                 break;
             }
         }
 
         if (!downloadLink) {
-            // Check for specific safety filter reasons
-            for (const res of potentialResults) {
-                if (res?.raiMediaFilteredReasons && Array.isArray(res.raiMediaFilteredReasons) && res.raiMediaFilteredReasons.length > 0) {
-                     const reason = res.raiMediaFilteredReasons[0];
+            // Check for specific safety filter reasons on all roots
+            for (const root of potentialRoots) {
+                if (root?.raiMediaFilteredReasons && Array.isArray(root.raiMediaFilteredReasons) && root.raiMediaFilteredReasons.length > 0) {
+                     const reason = root.raiMediaFilteredReasons[0];
                      console.warn("Video filtered:", reason);
                      throw new Error(`Generation blocked: ${reason}`);
                 }
