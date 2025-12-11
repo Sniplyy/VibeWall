@@ -55,6 +55,26 @@ const App: React.FC = () => {
   });
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
+  // Branding State
+  const [branding, setBranding] = useState(() => {
+    const saved = localStorage.getItem('branding');
+    return saved ? JSON.parse(saved) : { logoUrl: '', brandColor: '#4f46e5' };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('branding', JSON.stringify(branding));
+    // Apply brand color to root if needed, mostly handled via inline styles for specific elements
+  }, [branding]);
+
+  // Theme State
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('theme') as 'light' | 'dark') || 'dark';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
   // Settings
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("9:16");
   const [imageSize, setImageSize] = useState<ImageSize>("1K");
@@ -335,10 +355,10 @@ const App: React.FC = () => {
             const result = reader.result as string;
             setUploadedImages(prev => {
                 if (prev.length >= 3) return prev;
-                // Removed the forced auto-switch to Live Mode so users can choose
                 return [...prev, result];
             });
-            setRemixSource(null);
+            // Note: We deliberately do NOT clear remixSource here to allow combining 
+            // a base image (remixSource) with new uploads (subjects)
         };
         reader.readAsDataURL(file);
     });
@@ -489,14 +509,14 @@ const App: React.FC = () => {
     const promptToUse = overrideParams?.prompt ?? prompt;
     const ratioToUse = overrideParams?.aspectRatio ?? aspectRatio;
     const modeToUse = overrideParams?.mode ?? (isLiveMode ? 'video' : 'image');
-    // For reference image: passed override, or uploadedImages state, or remixSource url
+    
+    // Combine inputs: override OR (remixSource + uploadedImages)
     let referenceToUse: string[] = [];
     if (overrideParams?.referenceImages !== undefined) {
         referenceToUse = overrideParams.referenceImages || [];
-    } else if (uploadedImages.length > 0) {
-        referenceToUse = uploadedImages;
-    } else if (remixSource) {
-        referenceToUse = [remixSource.url];
+    } else {
+        if (remixSource) referenceToUse.push(remixSource.url);
+        if (uploadedImages.length > 0) referenceToUse.push(...uploadedImages);
     }
 
     if (!promptToUse.trim() && referenceToUse.length === 0) return;
@@ -606,6 +626,21 @@ const App: React.FC = () => {
         inputRef.current.focus();
     }
   };
+
+  const handleReplaceSubject = (wallpaper: Wallpaper) => {
+    // 1. Set the base image
+    setRemixSource(wallpaper);
+    setActiveView('chat');
+    
+    // 2. Clear old uploads to make room for the new subject
+    setUploadedImages([]); 
+    
+    // 3. Set a guiding prompt
+    setPrompt("Replace the subject in this image with [describe new subject or upload image]");
+    
+    // 4. Trigger upload for immediate action
+    fileInputRef.current?.click();
+  };
   
   const handleGenerateSimilar = (wallpaper: Wallpaper) => {
       // 1. Close Viewer
@@ -654,7 +689,7 @@ const App: React.FC = () => {
   const lastUserMessageIndex = currentChat.messages.map(m => m.role).lastIndexOf('user');
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-50 overflow-hidden relative font-sans">
+    <div className={`flex h-screen overflow-hidden relative font-sans ${theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-slate-950 text-slate-50'}`}>
       
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
@@ -666,20 +701,28 @@ const App: React.FC = () => {
 
       {/* Sidebar */}
       <aside className={`
-        fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 border-r border-white/5 flex flex-col transition-transform duration-300 ease-in-out
+        fixed inset-y-0 left-0 z-50 w-72 border-r flex flex-col transition-transform duration-300 ease-in-out
+        ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-slate-900 border-white/5'}
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         lg:relative lg:translate-x-0
       `}>
-        <div className="p-4 flex items-center justify-between border-b border-white/5 h-16">
+        <div className={`p-4 flex items-center justify-between border-b h-16 ${theme === 'light' ? 'border-slate-200' : 'border-white/5'}`}>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30">
-                <Sparkles size={18} className="text-white" />
-            </div>
-            <h1 className="font-bold text-lg tracking-tight">VibeWall</h1>
+            {branding.logoUrl ? (
+                <img src={branding.logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-contain" />
+            ) : (
+                <div 
+                    className="w-8 h-8 rounded-lg flex items-center justify-center shadow-lg"
+                    style={{ backgroundColor: branding.brandColor }}
+                >
+                    <Sparkles size={18} className="text-white" />
+                </div>
+            )}
+            <h1 className={`font-bold text-lg tracking-tight ${theme === 'light' ? 'text-slate-900' : 'text-white'}`}>VibeWall</h1>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(false)}
-            className="lg:hidden p-1 text-slate-400 hover:text-white"
+            className="lg:hidden p-1 text-slate-400 hover:text-indigo-500"
           >
             <X size={20} />
           </button>
@@ -689,7 +732,8 @@ const App: React.FC = () => {
         <div className="p-3 space-y-2">
           <button 
             onClick={handleCreateChat}
-            className="w-full flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-3 rounded-xl font-medium transition-all shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
+            style={{ backgroundColor: branding.brandColor }}
+            className="w-full flex items-center gap-2 text-white px-4 py-3 rounded-xl font-medium transition-all shadow-lg hover:opacity-90 active:scale-[0.98]"
           >
             <Plus size={18} />
             <span>New Chat</span>
@@ -702,8 +746,8 @@ const App: React.FC = () => {
             }}
             className={`w-full flex items-center gap-2 px-4 py-3 rounded-xl font-medium transition-all ${
                 activeView === 'library'
-                ? 'bg-slate-800 text-white border border-white/10'
-                : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'
+                ? (theme === 'light' ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-white')
+                : (theme === 'light' ? 'text-slate-600 hover:bg-slate-50' : 'text-slate-400 hover:bg-white/5 hover:text-white')
             }`}
           >
             <Grid size={18} />
@@ -727,12 +771,12 @@ const App: React.FC = () => {
                   }}
                   className={`w-full group flex items-center justify-between p-3 rounded-lg text-sm transition-all text-left ${
                     activeView === 'chat' && activeChatId === chat.id 
-                      ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 shadow-sm' 
-                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border border-transparent'
+                      ? (theme === 'light' ? 'bg-indigo-50 text-indigo-700' : 'bg-indigo-500/10 text-indigo-300')
+                      : (theme === 'light' ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200')
                   }`}
                 >
                   <div className="flex items-center gap-3 overflow-hidden">
-                    <MessageSquare size={16} className={activeView === 'chat' && activeChatId === chat.id ? "text-indigo-400" : "text-slate-600"} />
+                    <MessageSquare size={16} className={activeView === 'chat' && activeChatId === chat.id ? "text-indigo-500" : "text-slate-500"} />
                     <span className="truncate">{chat.title}</span>
                   </div>
                   <div 
@@ -747,17 +791,17 @@ const App: React.FC = () => {
               ))}
         </div>
 
-        <div className="border-t border-white/5 bg-slate-900/50">
+        <div className={`border-t ${theme === 'light' ? 'border-slate-200 bg-slate-50' : 'border-white/5 bg-slate-900/50'}`}>
             {/* Status Line */}
-            <div className="px-4 py-2 border-b border-white/5 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+            <div className={`px-4 py-2 border-b flex items-center justify-between text-[10px] font-medium ${theme === 'light' ? 'border-slate-200 text-slate-500' : 'border-white/5 text-slate-500'}`}>
               <span>SYSTEM STATUS</span>
               {apiKeyReady ? (
-                 <span className="flex items-center gap-1 text-green-400">
+                 <span className="flex items-center gap-1 text-green-500">
                     <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
                     ONLINE
                  </span>
               ) : (
-                 <button onClick={handleSelectKey} className="flex items-center gap-1 text-yellow-400 hover:text-yellow-300">
+                 <button onClick={handleSelectKey} className="flex items-center gap-1 text-amber-500 hover:text-amber-600">
                     <Info size={10} />
                     KEY NEEDED
                  </button>
@@ -767,18 +811,21 @@ const App: React.FC = () => {
             {/* Profile Button */}
             <button 
                 onClick={() => setIsProfileOpen(true)}
-                className="w-full p-4 flex items-center gap-3 hover:bg-white/5 transition-colors text-left group"
+                className={`w-full p-4 flex items-center gap-3 transition-colors text-left group ${theme === 'light' ? 'hover:bg-slate-200' : 'hover:bg-white/5'}`}
             >
-                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-semibold shadow-lg group-hover:scale-105 transition-transform">
+                <div 
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold shadow-lg group-hover:scale-105 transition-transform"
+                    style={{ backgroundColor: branding.brandColor }}
+                >
                     {userName.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white truncate group-hover:text-indigo-300 transition-colors">{userName}</div>
-                    <div className="text-xs text-slate-400 truncate">
+                    <div className={`text-sm font-medium truncate transition-colors ${theme === 'light' ? 'text-slate-900' : 'text-white'}`}>{userName}</div>
+                    <div className="text-xs text-slate-500 truncate">
                         {isLoggedIn ? "Premium Plus" : `${2 - Math.min(guestUsage, 2)} free credits`}
                     </div> 
                 </div>
-                <Settings2 size={16} className="text-slate-600 group-hover:text-white transition-colors" />
+                <Settings2 size={16} className="text-slate-400 group-hover:text-indigo-500 transition-colors" />
             </button>
         </div>
       </aside>
@@ -787,18 +834,18 @@ const App: React.FC = () => {
       <div className="flex-1 flex flex-col h-full relative min-w-0">
         
         {/* Header */}
-        <header className="absolute top-0 left-0 right-0 z-20 bg-slate-950/80 backdrop-blur-md border-b border-white/5 px-4 h-16 flex justify-between items-center">
+        <header className={`absolute top-0 left-0 right-0 z-20 backdrop-blur-md border-b px-4 h-16 flex justify-between items-center ${theme === 'light' ? 'bg-white/80 border-slate-200' : 'bg-slate-950/80 border-white/5'}`}>
             <div className="flex items-center gap-3">
                 <button 
                     onClick={() => setIsSidebarOpen(true)}
-                    className="p-2 -ml-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors lg:hidden"
+                    className={`p-2 -ml-2 rounded-full transition-colors lg:hidden ${theme === 'light' ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/10 text-slate-400 hover:text-white'}`}
                 >
                     <Menu size={22} />
                 </button>
-                <h2 className="font-medium text-slate-200 truncate max-w-[200px] sm:max-w-md flex items-center gap-2">
+                <h2 className={`font-medium truncate max-w-[200px] sm:max-w-md flex items-center gap-2 ${theme === 'light' ? 'text-slate-800' : 'text-slate-200'}`}>
                     {activeView === 'library' ? (
                         <>
-                            <Grid size={18} className="text-indigo-400" />
+                            <Grid size={18} className="text-indigo-500" />
                             Your Library
                         </>
                     ) : (
@@ -819,7 +866,7 @@ const App: React.FC = () => {
                                     setSelectedMediaIds(new Set(allMedia.map(m => m.id)));
                                 }
                             }}
-                            className="text-xs font-medium text-slate-400 hover:text-white transition-colors mr-2 px-2 py-1 rounded hover:bg-white/5"
+                            className={`text-xs font-medium transition-colors mr-2 px-2 py-1 rounded ${theme === 'light' ? 'text-slate-500 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                         >
                             {selectedMediaIds.size === allMedia.length ? 'Deselect All' : 'Select All'}
                         </button>
@@ -828,8 +875,8 @@ const App: React.FC = () => {
                         onClick={toggleSelectionMode}
                         className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                             isSelectionMode 
-                            ? 'bg-slate-800 text-white' 
-                            : 'text-indigo-400 hover:bg-indigo-500/10'
+                            ? (theme === 'light' ? 'bg-slate-200 text-slate-900' : 'bg-slate-800 text-white')
+                            : 'text-indigo-500 hover:bg-indigo-500/10'
                         }`}
                     >
                         {isSelectionMode ? 'Cancel' : 'Select'}
@@ -841,7 +888,7 @@ const App: React.FC = () => {
             {activeView === 'chat' && (
                 <button 
                     onClick={() => setIsSettingsOpen(true)}
-                    className="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors relative"
+                    className={`p-2 rounded-full transition-colors relative ${theme === 'light' ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/10 text-slate-400 hover:text-white'}`}
                 >
                     <Settings2 size={22} />
                     {isLiveMode && (
@@ -858,11 +905,11 @@ const App: React.FC = () => {
                 <div className="container mx-auto pb-20">
                     {allMedia.length === 0 ? (
                         <div className="flex flex-col items-center justify-center mt-32 text-center px-6 opacity-60">
-                             <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mb-6 border border-slate-800">
-                                 <Grid size={40} className="text-slate-600" />
+                             <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-6 border ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
+                                 <Grid size={40} className="text-slate-500" />
                              </div>
-                             <h3 className="text-xl font-semibold mb-2">Library is empty</h3>
-                             <p className="text-slate-400 max-w-sm">
+                             <h3 className={`text-xl font-semibold mb-2 ${theme === 'light' ? 'text-slate-800' : 'text-white'}`}>Library is empty</h3>
+                             <p className="text-slate-500 max-w-sm">
                                  Generated images and videos will appear here. Start a chat to create something new!
                              </p>
                         </div>
@@ -881,10 +928,11 @@ const App: React.FC = () => {
                                         }
                                     }}
                                     className={`
-                                        group relative rounded-xl overflow-hidden border shadow-lg bg-slate-900 transition-all hover:scale-[1.02]
+                                        group relative rounded-xl overflow-hidden border shadow-lg transition-all hover:scale-[1.02]
+                                        ${theme === 'light' ? 'bg-white' : 'bg-slate-900'}
                                         ${isSelected 
                                             ? 'border-indigo-500 ring-2 ring-indigo-500/50' 
-                                            : 'border-white/5 hover:border-indigo-500/50 hover:shadow-indigo-500/10'
+                                            : (theme === 'light' ? 'border-slate-200 hover:border-indigo-300' : 'border-white/5 hover:border-indigo-500/50 hover:shadow-indigo-500/10')
                                         }
                                         ${getAspectRatioClass(media.aspectRatio)}
                                     `}
@@ -935,21 +983,21 @@ const App: React.FC = () => {
                 {/* Bulk Actions Floating Bar */}
                 {isSelectionMode && selectedMediaIds.size > 0 && (
                     <div className="absolute bottom-6 left-0 right-0 flex justify-center z-30 animate-in slide-in-from-bottom-4">
-                        <div className="bg-slate-900 border border-slate-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-6">
-                            <span className="text-sm font-semibold text-white mr-2">
+                        <div className={`border shadow-2xl rounded-full px-6 py-3 flex items-center gap-6 ${theme === 'light' ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-700 text-white'}`}>
+                            <span className="text-sm font-semibold mr-2">
                                 {selectedMediaIds.size} selected
                             </span>
-                            <div className="h-6 w-px bg-slate-700"></div>
+                            <div className={`h-6 w-px ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-700'}`}></div>
                             <button 
                                 onClick={handleBulkShare}
-                                className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors"
+                                className={`flex items-center gap-2 transition-colors ${theme === 'light' ? 'text-slate-600 hover:text-slate-900' : 'text-slate-300 hover:text-white'}`}
                             >
                                 <Share2 size={18} />
                                 <span className="text-sm font-medium">Share</span>
                             </button>
                             <button 
                                 onClick={handleBulkDelete}
-                                className="flex items-center gap-2 text-red-400 hover:text-red-300 transition-colors"
+                                className="flex items-center gap-2 text-red-400 hover:text-red-500 transition-colors"
                             >
                                 <Trash2 size={18} />
                                 <span className="text-sm font-medium">Delete</span>
@@ -966,11 +1014,11 @@ const App: React.FC = () => {
                     {/* Empty State */}
                     {currentChat.messages.length === 0 && (
                         <div className="flex flex-col items-center justify-center mt-20 text-center px-6 opacity-60">
-                            <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-4 border border-slate-800">
-                                <Bot size={32} className="text-slate-600" />
+                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 border ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
+                                <Bot size={32} className="text-slate-500" />
                             </div>
-                            <h3 className="text-xl font-semibold mb-2">How can I help you design?</h3>
-                            <p className="text-slate-400 max-w-sm">
+                            <h3 className={`text-xl font-semibold mb-2 ${theme === 'light' ? 'text-slate-800' : 'text-white'}`}>How can I help you design?</h3>
+                            <p className="text-slate-500 max-w-sm">
                                 Describe the wallpaper you want, upload a reference, or try the new Live Wallpaper mode in settings.
                             </p>
                         </div>
@@ -981,7 +1029,10 @@ const App: React.FC = () => {
                         <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                             {/* Avatar (Model Only) */}
                             {msg.role === 'model' && (
-                                <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0 mt-1 shadow-lg shadow-indigo-600/20">
+                                <div 
+                                    className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 shadow-lg"
+                                    style={{ backgroundColor: branding.brandColor }}
+                                >
                                     <Sparkles size={14} className="text-white" />
                                 </div>
                             )}
@@ -994,7 +1045,7 @@ const App: React.FC = () => {
                                         py-3 px-4 rounded-2xl text-sm leading-relaxed
                                         ${msg.role === 'user' 
                                             ? 'bg-slate-800 text-slate-100 rounded-tr-sm border border-slate-700' 
-                                            : 'bg-transparent text-slate-300 px-0 py-1'
+                                            : (theme === 'light' ? 'bg-transparent text-slate-800 px-0 py-1' : 'bg-transparent text-slate-300 px-0 py-1')
                                         }
                                     `}>
                                         {msg.content}
@@ -1036,7 +1087,8 @@ const App: React.FC = () => {
                                                 key={img.id}
                                                 onClick={() => setSelectedWallpaper(img)}
                                                 className={`
-                                                    group relative overflow-hidden rounded-xl bg-slate-900 border border-white/5 shadow-xl transition-all hover:scale-[1.02]
+                                                    group relative overflow-hidden rounded-xl border shadow-xl transition-all hover:scale-[1.02]
+                                                    ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-slate-900 border-white/5'}
                                                     ${getAspectRatioClass(img.aspectRatio)}
                                                 `}
                                             >
@@ -1073,7 +1125,10 @@ const App: React.FC = () => {
                     {/* Loading State */}
                     {loading && (
                         <div className="flex gap-4 justify-start">
-                            <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0 mt-1 animate-pulse">
+                            <div 
+                                className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 animate-pulse"
+                                style={{ backgroundColor: branding.brandColor }}
+                            >
                                 <Sparkles size={14} className="text-white" />
                             </div>
                             <div className="flex flex-col gap-3 max-w-[85%] w-full">
@@ -1083,7 +1138,7 @@ const App: React.FC = () => {
                                             <span>Creating video...</span>
                                             <span>{Math.round(loadingProgress)}%</span>
                                         </div>
-                                        <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                                        <div className={`h-1.5 w-full rounded-full overflow-hidden shadow-inner ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-800'}`}>
                                             <div 
                                                 className="h-full bg-indigo-500 transition-all duration-300 ease-out relative"
                                                 style={{ width: `${loadingProgress}%` }}
@@ -1095,8 +1150,8 @@ const App: React.FC = () => {
                                             Generating high-quality video usually takes about a minute.
                                         </p>
                                         {/* Video Skeleton */}
-                                        <div className={`${getAspectRatioClass(aspectRatio)} bg-slate-900/50 rounded-xl animate-pulse border border-white/5 flex items-center justify-center mt-2`}>
-                                             <Film className="text-slate-800 animate-bounce" size={24} />
+                                        <div className={`${getAspectRatioClass(aspectRatio)} rounded-xl animate-pulse border flex items-center justify-center mt-2 ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900/50 border-white/5'}`}>
+                                             <Film className="text-slate-500 animate-bounce" size={24} />
                                         </div>
                                     </div>
                                 ) : (
@@ -1106,8 +1161,8 @@ const App: React.FC = () => {
                                         </div>
                                         <div className={`grid gap-3 w-full grid-cols-2 max-w-md`}>
                                             {Array.from({ length: 4 }).map((_, i) => (
-                                                <div key={`skel-${i}`} className={`${getAspectRatioClass(aspectRatio)} bg-slate-900/50 rounded-xl animate-pulse border border-white/5 flex items-center justify-center`}>
-                                                    <Sparkles className="text-slate-800 animate-bounce" size={24} />
+                                                <div key={`skel-${i}`} className={`${getAspectRatioClass(aspectRatio)} rounded-xl animate-pulse border flex items-center justify-center ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-slate-900/50 border-white/5'}`}>
+                                                    <Sparkles className="text-slate-500 animate-bounce" size={24} />
                                                 </div>
                                             ))}
                                         </div>
@@ -1124,22 +1179,22 @@ const App: React.FC = () => {
 
         {/* Input Area (Only in Chat View) */}
         {activeView === 'chat' && (
-            <div className="absolute bottom-0 left-0 right-0 z-30 p-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pt-10">
+            <div className={`absolute bottom-0 left-0 right-0 z-30 p-4 pt-10 ${theme === 'light' ? 'bg-gradient-to-t from-white via-white/95 to-transparent' : 'bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent'}`}>
                 <div className="container mx-auto max-w-3xl">
                     {/* Reference Images Preview */}
-                    {((remixSource && uploadedImages.length === 0) || uploadedImages.length > 0) && (
+                    {(remixSource || uploadedImages.length > 0) && (
                         <div className="flex items-center gap-2 mb-3 animate-in slide-in-from-bottom-2 flex-wrap">
                             {/* Single Remix Source */}
-                            {remixSource && uploadedImages.length === 0 && (
-                                <div className="flex items-center gap-3 bg-indigo-900/30 border border-indigo-500/30 p-2 rounded-lg w-fit backdrop-blur-md">
+                            {remixSource && (
+                                <div className={`flex items-center gap-3 p-2 rounded-lg w-fit backdrop-blur-md border ${theme === 'light' ? 'bg-indigo-50 border-indigo-100' : 'bg-indigo-900/30 border-indigo-500/30'}`}>
                                     <img src={remixSource.url} alt="Reference" className="w-8 h-14 object-cover rounded shadow-sm" />
                                     <div className="flex flex-col">
-                                        <span className="text-xs text-indigo-200 font-medium">Remixing image</span>
-                                        <span className="text-[10px] text-indigo-300/70">Using as reference</span>
+                                        <span className={`text-xs font-medium ${theme === 'light' ? 'text-indigo-700' : 'text-indigo-200'}`}>Remixing image</span>
+                                        <span className={`text-[10px] ${theme === 'light' ? 'text-indigo-500' : 'text-indigo-300/70'}`}>Using as reference</span>
                                     </div>
                                     <button 
                                         onClick={() => setRemixSource(null)}
-                                        className="ml-2 p-1 hover:bg-white/10 rounded-full text-indigo-300 transition-colors"
+                                        className={`ml-2 p-1 rounded-full transition-colors ${theme === 'light' ? 'hover:bg-indigo-100 text-indigo-400' : 'hover:bg-white/10 text-indigo-300'}`}
                                     >
                                         <X size={14} />
                                     </button>
@@ -1160,8 +1215,8 @@ const App: React.FC = () => {
                             ))}
 
                             {uploadedImages.length > 0 && (
-                                <div className="text-xs text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded-md border border-indigo-500/20">
-                                    {uploadedImages.length} image{uploadedImages.length > 1 ? 's' : ''} added
+                                <div className={`text-xs px-2 py-1 rounded-md border ${theme === 'light' ? 'text-indigo-700 bg-indigo-50 border-indigo-100' : 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20'}`}>
+                                    {uploadedImages.length} upload{uploadedImages.length > 1 ? 's' : ''} added
                                     {uploadedImages.length > 1 && isLiveMode && " (Video Mode)"}
                                 </div>
                             )}
@@ -1210,7 +1265,7 @@ const App: React.FC = () => {
                             type="button"
                             disabled={loading}
                             onClick={() => fileInputRef.current?.click()}
-                            className="aspect-square h-auto w-12 rounded-2xl flex items-center justify-center transition-all bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className={`aspect-square h-auto w-12 rounded-2xl flex items-center justify-center transition-all border disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'light' ? 'bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-slate-200' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border-slate-700'}`}
                             title="Add images"
                         >
                             <Paperclip size={20} />
@@ -1222,7 +1277,7 @@ const App: React.FC = () => {
                             className={`aspect-square h-auto w-12 rounded-2xl flex items-center justify-center transition-all border ${
                                 isListening 
                                 ? 'bg-red-500/20 text-red-400 border-red-500/50 animate-pulse' 
-                                : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border-slate-700'
+                                : (theme === 'light' ? 'bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50 border-slate-200' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border-slate-700')
                             }`}
                             title="Voice Input"
                         >
@@ -1239,13 +1294,16 @@ const App: React.FC = () => {
                                     ? "Listening..."
                                     : isLiveMode 
                                         ? (remixSource || uploadedImages.length > 0 ? "Transform these images..." : "Describe a live wallpaper...") 
-                                        : (remixSource || uploadedImages.length > 0 ? "Describe changes..." : "Describe your vibe...")
+                                        : (remixSource && uploadedImages.length > 0 ? "Describe how to combine these..." : remixSource ? "Describe changes to this image..." : uploadedImages.length > 0 ? "Describe changes..." : "Describe your vibe...")
                             }
                             className={`
-                                flex-1 bg-slate-800/80 border text-white placeholder:text-slate-500 rounded-2xl px-5 py-3.5 focus:outline-none focus:ring-2 transition-all shadow-inner backdrop-blur-sm
+                                flex-1 border rounded-2xl px-5 py-3.5 focus:outline-none focus:ring-2 transition-all shadow-inner backdrop-blur-sm
+                                ${theme === 'light' 
+                                    ? 'bg-white/80 text-slate-900 placeholder:text-slate-400 border-slate-200 focus:ring-indigo-500/30' 
+                                    : 'bg-slate-800/80 text-white placeholder:text-slate-500 border-slate-700 focus:ring-indigo-500/50'}
                                 ${isLiveMode 
-                                    ? 'border-indigo-500/30 focus:ring-indigo-500/50' 
-                                    : 'border-slate-700 focus:ring-indigo-500/50'
+                                    ? 'border-indigo-500/30' 
+                                    : ''
                                 }
                             `}
                             disabled={loading}
@@ -1253,13 +1311,14 @@ const App: React.FC = () => {
                         <button
                             type="submit"
                             disabled={loading || (!prompt && !remixSource && uploadedImages.length === 0)}
+                            style={{ 
+                                backgroundColor: (!loading && (prompt || remixSource || uploadedImages.length > 0)) ? branding.brandColor : undefined 
+                            }}
                             className={`
                                 aspect-square h-auto w-14 rounded-2xl flex items-center justify-center transition-all shadow-lg
                                 ${loading || (!prompt && !remixSource && uploadedImages.length === 0)
-                                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                                    : isLiveMode 
-                                        ? 'bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-indigo-600/30 hover:scale-105 active:scale-95'
-                                        : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30 hover:scale-105 active:scale-95'
+                                    ? (theme === 'light' ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-800 text-slate-500 cursor-not-allowed')
+                                    : 'text-white hover:opacity-90 hover:scale-105 active:scale-95'
                                 }
                             `}
                         >
@@ -1297,6 +1356,10 @@ const App: React.FC = () => {
         isLoggedIn={isLoggedIn}
         onLogin={handleLogin}
         onLogout={handleLogout}
+        branding={branding}
+        setBranding={setBranding}
+        theme={theme}
+        toggleTheme={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
       />
 
       <ImageViewer 
@@ -1305,6 +1368,7 @@ const App: React.FC = () => {
         onRemix={handleRemix}
         onJumpToChat={activeView === 'library' ? handleJumpToChat : undefined}
         onGenerateSimilar={handleGenerateSimilar}
+        onReplaceSubject={handleReplaceSubject}
       />
       
     </div>

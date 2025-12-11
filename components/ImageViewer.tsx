@@ -9,6 +9,7 @@ interface ImageViewerProps {
   onRemix: (wallpaper: Wallpaper) => void;
   onJumpToChat?: () => void;
   onGenerateSimilar?: (wallpaper: Wallpaper) => void;
+  onReplaceSubject?: (wallpaper: Wallpaper) => void;
 }
 
 type FilterType = 'none' | 'cinematic' | 'film' | 'noir' | 'grayscale' | 'sepia' | 'vintage' | 'cool' | 'warm';
@@ -47,7 +48,7 @@ const SOCIAL_URLS: Record<string, string> = {
   telegram: 'https://web.telegram.org/',
 };
 
-const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, onJumpToChat, onGenerateSimilar }) => {
+const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, onJumpToChat, onGenerateSimilar, onReplaceSubject }) => {
   const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
@@ -124,14 +125,54 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, 
     document.body.removeChild(link);
   };
 
+  const convertToPngBlob = async (url: string): Promise<Blob> => {
+      return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.naturalWidth;
+              canvas.height = img.naturalHeight;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                  reject(new Error("Canvas context failed"));
+                  return;
+              }
+              ctx.drawImage(img, 0, 0);
+              canvas.toBlob((blob) => {
+                  if (blob) resolve(blob);
+                  else reject(new Error("Blob creation failed"));
+              }, 'image/png');
+          };
+          img.onerror = (e) => reject(e);
+          img.src = url;
+      });
+  };
+
+  const copyImageToClipboard = async (url: string) => {
+      try {
+          const response = await fetch(url);
+          let blob = await response.blob();
+          
+          // Clipboard API often requires PNG for images.
+          if (blob.type !== 'image/png') {
+              blob = await convertToPngBlob(url);
+          }
+          
+          await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+          ]);
+          return true;
+      } catch (e) {
+          console.error("Clipboard write failed", e);
+          throw e;
+      }
+  };
+
   const handleCopy = async () => {
       if (!activeUrl || wallpaper.type !== 'image') return;
       try {
-          const response = await fetch(activeUrl);
-          const blob = await response.blob();
-          await navigator.clipboard.write([
-              new ClipboardItem({ [blob.type]: blob })
-          ]);
+          await copyImageToClipboard(activeUrl);
           setShareFeedback('Copied!');
           setTimeout(() => setShareFeedback(null), 2000);
       } catch (err) {
@@ -146,7 +187,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, 
     setShareFeedback(null);
 
     try {
-        // Prepare File
+        // Prepare File for Native Share
         const response = await fetch(activeUrl!);
         const blob = await response.blob();
         const isVideo = wallpaper.type === 'video';
@@ -157,10 +198,10 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, 
         
         const file = new File([blob], `vibewall-${wallpaper.id}.${ext}`, { type: mimeType });
 
-        // 1. "Copy Link" Action
+        // 1. "Copy Link" Action (Effective Copy Image)
         if (platformId === 'link') {
             if (wallpaper.type === 'image' && typeof ClipboardItem !== 'undefined' && navigator.clipboard) {
-                await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+                await copyImageToClipboard(activeUrl!);
                 setShareFeedback('Image Copied!');
             } else {
                  setShareFeedback('Link Copied!'); 
@@ -192,7 +233,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, 
                 const name = SOCIAL_PLATFORMS.find(p => p.id === platformId)?.name || 'App';
                 setShareFeedback(`Saved! Upload to ${name}`);
             } else if (wallpaper.type === 'image' && typeof ClipboardItem !== 'undefined' && navigator.clipboard) {
-                 await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+                 await copyImageToClipboard(activeUrl!);
                  setShareFeedback(`Copied! Paste in App`);
             } else {
                  handleDownload();
@@ -655,6 +696,21 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ wallpaper, onClose, onRemix, 
                     <Edit2 size={18} />
                     <span className="hidden sm:inline">Edit</span>
                 </button>
+
+                {/* Replace Subject */}
+                {onReplaceSubject && (
+                    <button 
+                        onClick={() => {
+                            onReplaceSubject(wallpaper);
+                            onClose();
+                        }}
+                        className="flex-1 min-w-[60px] max-w-[120px] flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-500 text-white py-3 px-2 rounded-xl font-medium transition-all shadow-lg shadow-pink-600/20 text-sm"
+                        title="Replace Subject"
+                    >
+                        <RefreshCw size={18} className="scale-x-[-1]" />
+                        <span className="hidden sm:inline">Replace</span>
+                    </button>
+                )}
 
                 {/* Generate Similar */}
                 {onGenerateSimilar && (
